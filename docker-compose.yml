@@ -1,0 +1,33 @@
+# ── Docker Compose ──────────────────────────────────────────────
+
+services:
+  backend:
+    build: .
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/app/chroma_data
+      - sqlite_data:/app
+    environment:
+      - DEBUG=False
+      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
+      - SECRET_KEY=${SECRET_KEY:-change-me}
+      - ALLOWED_HOSTS=${DOMAIN:-localhost}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  sqlite_data:

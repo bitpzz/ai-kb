@@ -1,0 +1,40 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Django
+*.log
+db.sqlite3-journal
+
+# 环境
+.env
+
+# 向量数据库
+chroma_data/
+
+# 媒体文件
+media/
+
+# 静态文件
+staticfiles/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+.env
+
+# Venv (already committed by mistake, will stay tracked)
+venv/
+
+# Deploy
+deploy.sh
