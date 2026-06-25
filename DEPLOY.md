@@ -28,10 +28,8 @@ cd /opt/ai-kb
 
 ```bash
 cat > .env << 'EOF'
-SILICONFLOW_API_KEY=sk-your-api-key-here
-SECRET_KEY=<生成一个随机字符串>
-DEBUG=False
-ALLOWED_HOSTS=<your-server-ip>
+SILICONFLOW_API_KEY=把你的API_KEY放这里
+SECRET_KEY=生成一个随机字符串
 EOF
 ```
 
