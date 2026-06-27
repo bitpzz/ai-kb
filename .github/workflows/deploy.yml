@@ -3,6 +3,17 @@ name: Deploy to Server
 on:
   push:
     branches: [main]
+    paths:      # 只有改这些文件才触发部署
+      - "**.py"
+      - "**.js"
+      - "**.jsx"
+      - "**.html"
+      - "**.css"
+      - "requirements.txt"
+      - "Dockerfile"
+      - "frontend/Dockerfile"
+      - "frontend/package.json"
+      - "frontend/nginx.conf"
 
 env:
   REGISTRY: ghcr.io
