@@ -13,7 +13,6 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState("");
-  const [streamingSources, setStreamingSources] = useState([]);
   const endRef = useRef(null);
 
   useEffect(() => { getKB(kbId).then(r => setKb(r.data)); }, [kbId]);
@@ -36,7 +35,10 @@ export default function ChatPage() {
     setMessages(p => [...p, { role: "user", content: msg, sources: [], id: Date.now() }]);
     setStreaming(true);
     setStreamingText("");
-    setStreamingSources([]);
+
+    // 用局部变量捕获 SSE 流结果，避免 React 闭包陷阱
+    let text = "";
+    let sources = [];
 
     try {
       const r = conv ? await continueChat(conv.id, msg) : await newChat(kbId, msg);
@@ -49,7 +51,6 @@ export default function ChatPage() {
 
       const reader = r.body.getReader();
       const d = new TextDecoder();
-      let text = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -59,14 +60,15 @@ export default function ChatPage() {
           try {
             const j = JSON.parse(line.slice(6));
             if (j.type === "text") { text += j.content; setStreamingText(text); }
-            else if (j.type === "sources") setStreamingSources(j.content);
+            else if (j.type === "sources") sources = j.content;
           } catch {}
         }
       }
 
-      setMessages(p => [...p, { role: "assistant", content: text, sources: streamingSources, id: Date.now() }]);
+      // 用局部变量 sources 而不是 state variable
+      setMessages(p => [...p, { role: "assistant", content: text, sources, id: Date.now() }]);
       const target = cid || conv?.id;
-      if (target) try { await saveAssistantMessage(target, text, streamingSources); } catch {}
+      if (target) try { await saveAssistantMessage(target, text, sources); } catch {}
     } catch (e) {
       setMessages(p => [...p, { role: "assistant", content: "出错了：" + e.message, sources: [], id: Date.now() }]);
     } finally {
@@ -80,7 +82,7 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen flex bg-white">
-      {/* ── 侧栏 ── */}
+      {/* 侧栏 */}
       <aside className="w-64 flex flex-col bg-gray-50 border-r border-gray-100 shrink-0">
         <div className="p-4">
           <Link to="/" className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
@@ -111,9 +113,8 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* ── 聊天主区 ── */}
+      {/* 聊天主区 */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* 消息区 */}
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 && !streaming ? (
             <div className="h-full flex items-center justify-center">

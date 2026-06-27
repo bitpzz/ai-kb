@@ -55,7 +55,6 @@ class VectorStore:
         if all_e is None or len(all_c) == 0:
             return []
         q = np.array(q_emb)
-        # 手写余弦相似度（不需要 sklearn）
         sims = np.dot(all_e, q) / (np.linalg.norm(all_e, axis=1) * np.linalg.norm(q) + 1e-10)
         top = np.argsort(sims)[::-1][:top_k]
         return [
@@ -77,16 +76,50 @@ def get_store(kb_id):
 
 # ── Parsing ──────────────────────────────────────────────────────
 
+import io
+
+def _read_with_fallback_encodings(fp):
+    """Try utf-8 → gbk → latin-1 for text files."""
+    for enc in ['utf-8', 'gbk', 'gb2312', 'latin-1']:
+        try:
+            return fp.read_text(encoding=enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return fp.read_text(encoding='utf-8', errors='replace')
+
 def parse_pdf(fp):
     from PyPDF2 import PdfReader
-    return "\n\n".join(p.extract_text() or "" for p in PdfReader(str(fp)).pages)
+    parts = []
+    for page in PdfReader(str(fp)).pages:
+        t = page.extract_text()
+        if t:
+            parts.append(t)
+    return "\n\n".join(parts)
 
 def parse_docx(fp):
     from docx import Document
-    return "\n\n".join(p.text for p in Document(str(fp)).paragraphs if p.text.strip())
+    doc = Document(str(fp))
+    parts = []
+    # 段落
+    for p in doc.paragraphs:
+        if p.text.strip():
+            # 检测标题样式
+            if p.style and p.style.name and p.style.name.startswith('Heading'):
+                level = p.style.name.replace('Heading ', '').strip()
+                prefix = '#' * min(int(level), 4) if level.isdigit() else ''
+                parts.append(f"\n{prefix} {p.text.strip()}\n")
+            else:
+                parts.append(p.text.strip())
+    # 表格内容
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n\n".join(parts)
 
 def parse_txt(fp):
-    return fp.read_text(encoding="utf-8", errors="replace")
+    return _read_with_fallback_encodings(fp)
 
 PARSERS = {"pdf": parse_pdf, "docx": parse_docx, "doc": parse_docx, "txt": parse_txt, "md": parse_txt}
 
@@ -94,48 +127,78 @@ def parse_document(fp, ft):
     return PARSERS.get(ft.lower(), parse_txt)(fp)
 
 
-# ── Chunking (纯 Python，无 langchain 依赖) ───────────────────────
+# ── Chunking ─────────────────────────────────────────────────────
 
-def chunk_text(text, chunk_size=500, overlap=50):
-    """Simple recursive splitter: paragraphs → sentences → chars."""
-    if not text.strip():
+# 中文句子边界：。！？；：\n
+# 英文句子边界：.!?;:\n
+# 混合边界
+_SENT_END = r'(?<=[。！？；：.!?;:\n])\s*'
+
+def chunk_text(text, chunk_size=600, overlap=80):
+    """Split text into overlapping chunks, preserving structure.
+
+    Strategy: split by double-newline (paragraphs/sections) first,
+    then split long paragraphs by sentence boundary, then force-split
+    by character if still too long.
+    """
+    if not text or not text.strip():
         return []
-    # 先按段落分
-    paras = re.split(r'\n\s*\n', text)
+
+    text = re.sub(r'\n{3,}', '\n\n', text)  # normalize
+    text = re.sub(r' +', ' ', text)          # collapse spaces
+
+    # 保留可能的 Markdown 标题 (#, ##, ###)
+    sections = re.split(r'(\n(?=#{1,4} )|\n{2,})', text)
+
     chunks = []
     buf = ""
-    for p in paras:
-        p = p.strip()
-        if not p:
+
+    for sec in sections:
+        if not sec or sec.startswith('\n'):
+            if buf:
+                chunks.append(buf.strip())
+                buf = ""
             continue
-        if len(buf) + len(p) + 1 <= chunk_size:
-            buf = (buf + "\n\n" + p).strip()
+
+        sec = sec.strip()
+        if not sec:
+            continue
+
+        # 短段落直接拼到缓冲区
+        if len(buf) + len(sec) + 2 <= chunk_size:
+            buf = (buf + "\n\n" + sec).strip()
         else:
             if buf:
-                chunks.append(buf)
-            # 如果单段太长，按句子切
-            if len(p) > chunk_size:
-                sents = re.split(r'(?<=[。.！!？?])\s*', p)
+                chunks.append(buf.strip())
+            # 单段太长 → 按句子切
+            if len(sec) > chunk_size:
+                sents = re.split(_SENT_END, sec)
                 sbuf = ""
                 for s in sents:
-                    if len(sbuf) + len(s) <= chunk_size:
-                        sbuf += s
+                    s = s.strip()
+                    if not s:
+                        continue
+                    if len(sbuf) + len(s) + 1 <= chunk_size:
+                        sbuf = (sbuf + " " + s).strip() if sbuf else s
                     else:
                         if sbuf:
                             chunks.append(sbuf)
-                        # 按字符强制切
-                        for i in range(0, len(s), chunk_size - overlap):
-                            chunks.append(s[i:i+chunk_size])
-                        sbuf = ""
-                if sbuf:
-                    buf = sbuf
-                else:
-                    buf = ""
+                        # 单句太长 → 按字符 force-split
+                        if len(s) > chunk_size:
+                            step = chunk_size - overlap
+                            for i in range(0, len(s), step):
+                                chunks.append(s[i:i+chunk_size])
+                        else:
+                            sbuf = s
+                buf = sbuf if sbuf and len(sbuf) <= chunk_size else ""
             else:
-                buf = p
-    if buf:
-        chunks.append(buf)
-    return [c for c in chunks if len(c) >= 10]
+                buf = sec
+
+    if buf and buf.strip():
+        chunks.append(buf.strip())
+
+    # 过滤太短的片段
+    return [c for c in chunks if len(c) >= 20]
 
 
 # ── Embedding ────────────────────────────────────────────────────
@@ -169,13 +232,21 @@ def process_document_task(doc_id):
     try:
         fp = Path(doc.file.path)
         content = parse_document(fp, doc.file_type)
-        doc.content_text = content
+        doc.content_text = content[:50000] if content else ""  # 保存前 50k 字符
         doc.save(update_fields=["content_text"])
+
         chunks = chunk_text(content)
         if not chunks:
-            chunks = [content[:500]]
-        embs = embed_chunks(chunks)
-        get_store(str(doc.kb_id)).add(str(doc.id), doc.filename, chunks, embs)
+            chunks = [content[:600]]
+
+        # 分批 embedding（每次最多 50 个片段）
+        all_embs = []
+        batch_size = 50
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i+batch_size]
+            all_embs.extend(embed_chunks(batch))
+
+        get_store(str(doc.kb_id)).add(str(doc.id), doc.filename, chunks, all_embs)
         doc.chunk_count = len(chunks)
         doc.status = Document.Status.READY
         doc.save(update_fields=["chunk_count", "status"])
