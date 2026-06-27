@@ -58,6 +58,40 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
+            # 创建目录（首次部署）
+            mkdir -p /opt/ai-kb
+
+            # 写入 docker-compose.yml
+            cat > /opt/ai-kb/docker-compose.yml << 'COMPOSE_EOF'
+            services:
+              backend:
+                image: ghcr.io/ZHANGZHH/ai-kb-backend:latest
+                command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
+                ports:
+                  - "127.0.0.1:8000:8000"
+                volumes:
+                  - data:/app/data
+                  - vector_data:/app/vector_data
+                environment:
+                  - DEBUG=False
+                  - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
+                  - SECRET_KEY=${SECRET_KEY}
+                  - ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
+                restart: unless-stopped
+
+              frontend:
+                image: ghcr.io/ZHANGZHH/ai-kb-frontend:latest
+                ports:
+                  - "80:80"
+                depends_on:
+                  - backend
+                restart: unless-stopped
+
+            volumes:
+              data:
+              vector_data:
+            COMPOSE_EOF
+
             cd /opt/ai-kb
             # 停掉宝塔 Nginx 释放 80 端口（由 Docker 前端接管）
             systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true
@@ -65,12 +99,12 @@ jobs:
             # 如果 80 端口还被占，杀掉占用进程
             fuser -k 80/tcp 2>/dev/null || true
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            # 如果 .env 不存在则创建
-            test -f .env || cat > .env << 'EOF'
-SILICONFLOW_API_KEY=${{ secrets.SILICONFLOW_API_KEY }}
-SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
-ALLOWED_HOSTS=${{ secrets.SERVER_HOST }}
-EOF
+            # 创建 .env
+            cat > .env << 'EOF'
+            SILICONFLOW_API_KEY=${{ secrets.SILICONFLOW_API_KEY }}
+            SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+            ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
+            EOF
             docker compose pull
             docker compose up -d --force-recreate
             docker image prune -f
