@@ -71,13 +71,19 @@ jobs:
           command_timeout: 10m
           script: |
             set -e
-            echo "=== 1. 检查 Docker ==="
-            if ! command -v docker &>/dev/null; then
-              echo "Docker 未安装，正在安装..."
-              curl -fsSL https://get.docker.com | bash
-              systemctl start docker
-              systemctl enable docker
-            fi
+            echo "=== 1. 配置 Docker 国内镜像加速 ==="
+            mkdir -p /etc/docker
+            cat > /etc/docker/daemon.json << 'JSON'
+            {
+              "registry-mirrors": [
+                "https://docker.m.daocloud.io",
+                "https://docker.1panel.live",
+                "https://hub.rat.dev"
+              ]
+            }
+            JSON
+            systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
+            sleep 2
             docker --version
 
             echo "=== 2. 创建目录 ==="
@@ -126,7 +132,11 @@ jobs:
 
             echo "=== 6. 拉取镜像并启动 ==="
             cd /opt/ai-kb
-            docker compose pull
+            # 重试拉取，每次最多 5 分钟
+            for i in 1 2 3; do
+              echo "拉取第 $i 次..."
+              docker compose pull --quiet && break || sleep 10
+            done
             docker compose up -d --force-recreate
             docker image prune -f
 
