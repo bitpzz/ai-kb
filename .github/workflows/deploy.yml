@@ -59,6 +59,11 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             cd /opt/ai-kb
+            # 停掉宝塔 Nginx 释放 80 端口（由 Docker 前端接管）
+            systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true
+            systemctl disable nginx 2>/dev/null || true
+            # 如果 80 端口还被占，杀掉占用进程
+            fuser -k 80/tcp 2>/dev/null || true
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             # 如果 .env 不存在则创建
             test -f .env || cat > .env << 'EOF'
