@@ -46,7 +46,9 @@ jobs:
             git pull origin main
 
             echo "=== 3. 构建镜像 ==="
-            docker compose build
+            # 首次慢（需下载基础镜像），后续只用增量层
+            export DOCKER_BUILDKIT=1
+            docker compose build --build-arg BUILDKIT_INLINE_CACHE=1
 
             echo "=== 4. 重启容器 ==="
             docker compose up -d --force-recreate
