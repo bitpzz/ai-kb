@@ -1,7 +1,6 @@
 import axios from "axios";
 
-// API 与前端同端口，通过 /kb/api/ 代理到后端
-const API_BASE = "/kb/api";
+const API_BASE = "/api";
 
 const api = axios.create({ baseURL: API_BASE, headers: { "Content-Type": "application/json" } });
 
