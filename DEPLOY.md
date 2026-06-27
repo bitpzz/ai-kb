@@ -67,3 +67,37 @@ docker compose up -d --build  # 重新构建并启动
 docker compose logs backend   # 只看后端日志
 docker compose exec backend python manage.py shell  # 进 Django shell
 ```
+
+## CI/CD 自动部署
+
+本项目使用 GitHub Actions 自动部署到服务器。
+
+### 工作流文件
+`.github/workflows/deploy.yml`
+
+### 流程
+1. `git push` 到 `main` 分支
+2. GitHub Actions 自动触发
+3. 构建 Docker 镜像（前端 + 后端）
+4. 推送到 GitHub Container Registry (ghcr.io)
+5. SSH 到服务器，拉取最新镜像并重启
+
+### 必需的 GitHub Secrets
+
+| Secret | 说明 |
+|--------|------|
+| `SERVER_HOST` | 服务器 IP，如 82.156.164.62 |
+| `SERVER_USER` | SSH 用户名，如 root |
+| `SERVER_PASSWORD` | SSH 密码 |
+| `SILICONFLOW_API_KEY` | 硅基流动 API key |
+| `DJANGO_SECRET_KEY` | Django 密钥（随机字符串） |
+
+### 服务器首次初始化
+
+```bash
+ssh root@your-server
+mkdir -p /opt/ai-kb
+cd /opt/ai-kb
+# 复制项目中的 docker-compose.yml 到此目录
+# 之后每次 git push 会自动拉取最新镜像
+```
