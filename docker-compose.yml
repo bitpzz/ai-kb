@@ -1,27 +1,21 @@
-# ── Docker Compose ──────────────────────────────────────────────
-
 services:
   backend:
-    build: .
-    command: >
-      sh -c "python manage.py migrate &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
+    image: ghcr.io/ZHANGZHH/ai-kb-backend:latest
+    command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
     ports:
       - "8000:8000"
     volumes:
-      - chroma_data:/app/chroma_data
-      - sqlite_data:/app
+      - data:/app/data
+      - vector_data:/app/vector_data
     environment:
       - DEBUG=False
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
-      - SECRET_KEY=${SECRET_KEY:-change-me}
-      - ALLOWED_HOSTS=${DOMAIN:-localhost}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-82.156.164.62}
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/ZHANGZHH/ai-kb-frontend:latest
     ports:
       - "80:80"
     depends_on:
@@ -29,5 +23,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  chroma_data:
-  sqlite_data:
+  data:
+  vector_data:

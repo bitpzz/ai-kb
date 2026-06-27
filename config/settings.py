@@ -27,7 +27,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",
-    "django_q",
+    "django_q",  # optional: can remove if not using async tasks
     # Local
     "apps.accounts",
     "apps.knowledge",
@@ -117,17 +117,18 @@ SILICONFLOW_BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflo
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-ai/DeepSeek-V3")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
 
-# ── ChromaDB ────────────────────────────────────────────────────
-CHROMA_PERSIST_DIR = BASE_DIR / "chroma_data"
+# ── ChromaDB (unused, replaced by numpy vector store) ──────────
+CHROMA_PERSIST_DIR = BASE_DIR / "vector_data"
 
-# ── Django-Q ────────────────────────────────────────────────────
-Q_CLUSTER = {
-    "name": "rag_kb",
-    "workers": 2,
-    "recycle": 500,
-    "timeout": 300,
-    "retry": 600,
-    "compress": True,
-    "save_limit": 250,
-    "queue_limit": 500,
-}
+# ── Django-Q (optional) ────────────────────────────────────────
+# Not required for MVP, can be removed if redis is unavailable
+# Q_CLUSTER = {
+#     "name": "rag_kb",
+#     "workers": 2,
+#     "recycle": 500,
+#     "timeout": 300,
+#     "retry": 600,
+#     "compress": True,
+#     "save_limit": 250,
+#     "queue_limit": 500,
+# }

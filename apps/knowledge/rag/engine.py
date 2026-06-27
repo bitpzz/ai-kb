@@ -1,56 +1,13 @@
 """
-Document parsing, chunking, embedding, and ChromaDB storage.
+Document parsing, chunking, embedding, vector storage.
+Zero heavy dependencies: numpy + custom splitter + cosine similarity.
 """
 
-import os
-import uuid
-from dataclasses import dataclass
+import json, re, shutil
 from pathlib import Path
-
-import chromadb
-from chromadb.config import Settings as ChromaSettings
+import numpy as np
 from django.conf import settings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
-
-# ── ChromaDB client (lazy init) ──────────────────────────────────
-_chroma_client = None
-
-
-def get_chroma_client() -> chromadb.ClientAPI:
-    global _chroma_client
-    if _chroma_client is None:
-        chroma_dir = str(settings.CHROMA_PERSIST_DIR)
-        os.makedirs(chroma_dir, exist_ok=True)
-        _chroma_client = chromadb.PersistentClient(
-            path=chroma_dir,
-            settings=ChromaSettings(anonymized_telemetry=False),
-        )
-    return _chroma_client
-
-
-def get_collection_name(kb_id: str) -> str:
-    """Each knowledge base gets its own Chroma collection."""
-    return f"kb_{kb_id}"
-
-
-def get_or_create_collection(kb_id: str):
-    client = get_chroma_client()
-    name = get_collection_name(kb_id)
-    try:
-        return client.get_collection(name)
-    except Exception:
-        return client.create_collection(name)
-
-
-def delete_collection(kb_id: str):
-    """Remove a collection from ChromaDB."""
-    client = get_chroma_client()
-    name = get_collection_name(kb_id)
-    try:
-        client.delete_collection(name)
-    except Exception:
-        pass
 
 
 def get_embedding_client() -> OpenAI:
@@ -60,187 +17,172 @@ def get_embedding_client() -> OpenAI:
     )
 
 
+# ── Vector store ─────────────────────────────────────────────────
+
+class VectorStore:
+    def __init__(self, kb_id: str):
+        self.store_dir = Path(settings.CHROMA_PERSIST_DIR) / f"kb_{kb_id}"
+        self.store_dir.mkdir(parents=True, exist_ok=True)
+
+    def _load(self):
+        cf = self.store_dir / "chunks.json"
+        ef = self.store_dir / "embeddings.npy"
+        if not cf.exists() or not ef.exists():
+            return [], None
+        return json.loads(cf.read_text(encoding="utf-8")), np.load(ef)
+
+    def _save(self, chunks, emb):
+        (self.store_dir / "chunks.json").write_text(json.dumps(chunks, ensure_ascii=False), encoding="utf-8")
+        np.save(self.store_dir / "embeddings.npy", emb)
+
+    def add(self, doc_id, filename, chunks, embeddings):
+        all_c, all_e = self._load()
+        for i, (c, e) in enumerate(zip(chunks, embeddings)):
+            all_c.append({"doc_id": doc_id, "filename": filename, "chunk_index": i, "content": c})
+        new_e = np.array(embeddings) if all_e is None else np.vstack([all_e, embeddings])
+        self._save(all_c, new_e)
+
+    def remove_doc(self, doc_id):
+        all_c, all_e = self._load()
+        keep = [i for i, c in enumerate(all_c) if c["doc_id"] != doc_id]
+        if not keep:
+            shutil.rmtree(self.store_dir, ignore_errors=True)
+            return
+        self._save([all_c[i] for i in keep], all_e[keep])
+
+    def query(self, q_emb, top_k=5):
+        all_c, all_e = self._load()
+        if all_e is None or len(all_c) == 0:
+            return []
+        q = np.array(q_emb)
+        # 手写余弦相似度（不需要 sklearn）
+        sims = np.dot(all_e, q) / (np.linalg.norm(all_e, axis=1) * np.linalg.norm(q) + 1e-10)
+        top = np.argsort(sims)[::-1][:top_k]
+        return [
+            {"content": all_c[i]["content"][:500], "filename": all_c[i]["filename"], "chunk_index": all_c[i]["chunk_index"]}
+            for i in top if sims[i] > 0.1
+        ]
+
+    def count(self):
+        c, _ = self._load()
+        return len(c) if c else 0
+
+
+def delete_collection(kb_id):
+    shutil.rmtree(Path(settings.CHROMA_PERSIST_DIR) / f"kb_{kb_id}", ignore_errors=True)
+
+def get_store(kb_id):
+    return VectorStore(kb_id)
+
+
 # ── Parsing ──────────────────────────────────────────────────────
 
-def parse_pdf(file_path: Path) -> str:
+def parse_pdf(fp):
     from PyPDF2 import PdfReader
+    return "\n\n".join(p.extract_text() or "" for p in PdfReader(str(fp)).pages)
 
-    reader = PdfReader(str(file_path))
-    text_parts = []
-    for page in reader.pages:
-        t = page.extract_text()
-        if t:
-            text_parts.append(t)
-    return "\n\n".join(text_parts)
-
-
-def parse_docx(file_path: Path) -> str:
+def parse_docx(fp):
     from docx import Document
+    return "\n\n".join(p.text for p in Document(str(fp)).paragraphs if p.text.strip())
 
-    doc = Document(str(file_path))
-    return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+def parse_txt(fp):
+    return fp.read_text(encoding="utf-8", errors="replace")
 
+PARSERS = {"pdf": parse_pdf, "docx": parse_docx, "doc": parse_docx, "txt": parse_txt, "md": parse_txt}
 
-def parse_txt(file_path: Path) -> str:
-    return file_path.read_text(encoding="utf-8", errors="replace")
-
-
-PARSERS = {
-    "pdf": parse_pdf,
-    "docx": parse_docx,
-    "doc": parse_docx,
-    "txt": parse_txt,
-    "md": parse_txt,
-}
+def parse_document(fp, ft):
+    return PARSERS.get(ft.lower(), parse_txt)(fp)
 
 
-def parse_document(file_path: Path, file_type: str) -> str:
-    parser = PARSERS.get(file_type.lower(), parse_txt)
-    return parser(file_path)
+# ── Chunking (纯 Python，无 langchain 依赖) ───────────────────────
 
-
-# ── Chunking ─────────────────────────────────────────────────────
-
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        separators=["\n\n", "\n", "。", ".", " ", ""],
-    )
-    return splitter.split_text(text)
+def chunk_text(text, chunk_size=500, overlap=50):
+    """Simple recursive splitter: paragraphs → sentences → chars."""
+    if not text.strip():
+        return []
+    # 先按段落分
+    paras = re.split(r'\n\s*\n', text)
+    chunks = []
+    buf = ""
+    for p in paras:
+        p = p.strip()
+        if not p:
+            continue
+        if len(buf) + len(p) + 1 <= chunk_size:
+            buf = (buf + "\n\n" + p).strip()
+        else:
+            if buf:
+                chunks.append(buf)
+            # 如果单段太长，按句子切
+            if len(p) > chunk_size:
+                sents = re.split(r'(?<=[。.！!？?])\s*', p)
+                sbuf = ""
+                for s in sents:
+                    if len(sbuf) + len(s) <= chunk_size:
+                        sbuf += s
+                    else:
+                        if sbuf:
+                            chunks.append(sbuf)
+                        # 按字符强制切
+                        for i in range(0, len(s), chunk_size - overlap):
+                            chunks.append(s[i:i+chunk_size])
+                        sbuf = ""
+                if sbuf:
+                    buf = sbuf
+                else:
+                    buf = ""
+            else:
+                buf = p
+    if buf:
+        chunks.append(buf)
+    return [c for c in chunks if len(c) >= 10]
 
 
 # ── Embedding ────────────────────────────────────────────────────
 
-@dataclass
-class ChunkWithMeta:
-    chunk_index: int
-    content: str
-    filename: str
-
-
-def embed_chunks(chunks: list[str]) -> list[list[float]]:
-    """Batch embed chunks using SiliconFlow embedding API."""
+def embed_chunks(chunks):
     client = get_embedding_client()
-    resp = client.embeddings.create(
-        model=settings.EMBEDDING_MODEL,
-        input=chunks,
-    )
+    resp = client.embeddings.create(model=settings.EMBEDDING_MODEL, input=chunks)
     return [d.embedding for d in resp.data]
-
-
-# ── Store ────────────────────────────────────────────────────────
-
-def store_document_chunks(
-    kb_id: str,
-    doc_id: str,
-    filename: str,
-    chunks: list[str],
-    embeddings: list[list[float]],
-):
-    """Store chunks + embeddings into ChromaDB."""
-    collection = get_or_create_collection(kb_id)
-    n = len(chunks)
-    collection.add(
-        ids=[f"{doc_id}_{i}" for i in range(n)],
-        embeddings=embeddings,
-        documents=chunks,
-        metadatas=[
-            {"doc_id": doc_id, "filename": filename, "chunk_index": i}
-            for i in range(n)
-        ],
-    )
-
-
-def remove_document_chunks(kb_id: str, doc_id: str):
-    """Remove all chunks for a document from ChromaDB."""
-    collection = get_or_create_collection(kb_id)
-    try:
-        results = collection.get(
-            where={"doc_id": doc_id},
-        )
-        ids = results.get("ids", [])
-        if ids:
-            collection.delete(ids=ids)
-    except Exception:
-        pass
 
 
 # ── Retrieve ─────────────────────────────────────────────────────
 
-def retrieve(kb_id: str, query: str, top_k: int = 5) -> list[dict]:
-    """Retrieve top-K relevant chunks for a query.
-
-    Returns list of {"content": ..., "filename": ..., "chunk_index": ...}
-    """
-    collection = get_or_create_collection(kb_id)
-    if collection.count() == 0:
+def retrieve(kb_id, query, top_k=5):
+    store = get_store(kb_id)
+    if store.count() == 0:
         return []
-
-    client = get_embedding_client()
-    resp = client.embeddings.create(
-        model=settings.EMBEDDING_MODEL,
-        input=[query],
-    )
-    query_embedding = resp.data[0].embedding
-
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=min(top_k, collection.count()),
-        include=["documents", "metadatas", "distances"],
-    )
-
-    sources = []
-    if results["documents"] and results["documents"][0]:
-        for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-            sources.append({
-                "content": doc[:500],  # truncate for context
-                "filename": meta.get("filename", ""),
-                "chunk_index": meta.get("chunk_index", 0),
-            })
-    return sources
+    resp = get_embedding_client().embeddings.create(model=settings.EMBEDDING_MODEL, input=[query])
+    return store.query(resp.data[0].embedding, top_k)
 
 
-# ── Full pipeline (called by django-q async task) ─────────────────
+# ── Async task ───────────────────────────────────────────────────
 
-def process_document_task(doc_id: str):
-    """Async task: parse → chunk → embed → store → update status."""
+def process_document_task(doc_id):
     from apps.knowledge.models import Document
-
     try:
         doc = Document.objects.get(id=doc_id)
     except Document.DoesNotExist:
         return
-
     doc.status = Document.Status.PROCESSING
     doc.save(update_fields=["status"])
-
     try:
-        file_path = Path(doc.file.path)
-        content = parse_document(file_path, doc.file_type)
+        fp = Path(doc.file.path)
+        content = parse_document(fp, doc.file_type)
         doc.content_text = content
         doc.save(update_fields=["content_text"])
-
         chunks = chunk_text(content)
         if not chunks:
-            chunks = [content[:500]]  # fallback
-
-        embeddings = embed_chunks(chunks)
-
-        store_document_chunks(
-            kb_id=str(doc.kb_id),
-            doc_id=str(doc.id),
-            filename=doc.filename,
-            chunks=chunks,
-            embeddings=embeddings,
-        )
-
+            chunks = [content[:500]]
+        embs = embed_chunks(chunks)
+        get_store(str(doc.kb_id)).add(str(doc.id), doc.filename, chunks, embs)
         doc.chunk_count = len(chunks)
         doc.status = Document.Status.READY
         doc.save(update_fields=["chunk_count", "status"])
-
     except Exception as e:
         doc.status = Document.Status.ERROR
         doc.error_message = str(e)
         doc.save(update_fields=["status", "error_message"])
-        raise
+
+def remove_document_chunks(kb_id, doc_id):
+    get_store(kb_id).remove_doc(doc_id)
