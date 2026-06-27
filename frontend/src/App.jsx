@@ -12,7 +12,7 @@ function PrivateRoute({ children }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/ai-kb">
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />

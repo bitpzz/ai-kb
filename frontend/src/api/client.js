@@ -1,8 +1,6 @@
 import axios from "axios";
 
-// 本地开发用 localhost:8000，线上用同端口 /api（proxy.py 转发）
-const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const API_BASE = isLocal ? "http://localhost:8000/api" : "/api";
+const API_BASE = "/ai-kb/api";
 
 const api = axios.create({ baseURL: API_BASE, headers: { "Content-Type": "application/json" } });
 
@@ -15,19 +13,16 @@ api.interceptors.request.use((config) => {
 export const register = (u, p, e) => api.post("/auth/register/", { username: u, password: p, email: e });
 export const login = (u, p) => api.post("/auth/login/", { username: u, password: p });
 export const getMe = () => api.get("/auth/me/");
-
 export const listKBs = () => api.get("/knowledge-bases/");
 export const createKB = (data) => api.post("/knowledge-bases/", data);
 export const getKB = (id) => api.get(`/knowledge-bases/${id}/`);
 export const deleteKB = (id) => api.delete(`/knowledge-bases/${id}/`);
-
 export const listDocs = (kbId) => api.get(`/knowledge-bases/${kbId}/documents/`);
 export const uploadDoc = (kbId, file) => {
   const form = new FormData(); form.append("file", file);
   return api.post(`/knowledge-bases/${kbId}/documents/`, form, { headers: { "Content-Type": "multipart/form-data" } });
 };
 export const deleteDoc = (docId) => api.delete(`/documents/${docId}/`);
-
 export const listConvs = (kbId) => api.get(`/knowledge-bases/${kbId}/conversations/`);
 export const getConv = (convId) => api.get(`/conversations/${convId}/`);
 export const deleteConv = (convId) => api.delete(`/conversations/${convId}/`);
