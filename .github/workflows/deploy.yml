@@ -27,21 +27,13 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          command_timeout: 5m
+          command_timeout: 10m
           script: |
-            # 服务器上已有 .env（由首次手动部署创建，或宝塔面板直接编辑）
-            # 该脚本不传输任何密钥 — Secrets 仅用于 SSH 登录凭证，不落地到文件
-            cd /opt/ai-kb || { echo "/opt/ai-kb 不存在，请先在服务器上手动 git clone 一次"; exit 1; }
+            set -e
+            cd /opt/ai-kb || { echo "/opt/ai-kb 不存在，请先在服务器执行 setup.sh"; exit 1; }
             git pull origin main
-            pip3.12 install -r requirements.txt -q 2>/dev/null || python3.12 -m pip install -r requirements.txt -q
-            python3.12 manage.py migrate
-            cd frontend
-            npm install --quiet
-            npm run build
-            cd ..
-            pkill -f "gunicorn" 2>/dev/null || true
-            sleep 1
-            nohup gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 120 > /tmp/gunicorn.log 2>&1 &
-            sleep 2
-            pgrep -a gunicorn || echo "后端未启动！"
-            tail -5 /tmp/gunicorn.log
+            docker compose build
+            docker compose up -d --force-recreate
+            docker image prune -f
+            echo "=== 运行状态 ==="
+            docker compose ps
