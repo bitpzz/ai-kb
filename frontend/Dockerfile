@@ -1,6 +1,8 @@
 FROM node:24-alpine AS build
 
 WORKDIR /app
+# 换国内源，加速 npm
+RUN npm config set registry https://registry.npmmirror.com
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
