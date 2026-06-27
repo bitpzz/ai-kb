@@ -3,7 +3,7 @@ name: Deploy to Server
 on:
   push:
     branches: [main]
-    paths:      # 只有改这些文件才触发部署
+    paths:
       - ".github/**"
       - "**.py"
       - "**.js"
@@ -14,135 +14,34 @@ on:
       - "Dockerfile"
       - "docker-compose.yml"
       - "bt-nginx.conf"
-      - "frontend/Dockerfile"
-      - "frontend/package.json"
-      - "frontend/nginx.conf"
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME_BACKEND: ${{ github.repository }}-backend
-  IMAGE_NAME_FRONTEND: ${{ github.repository }}-frontend
+      - "frontend/**"
+      - "run.sh"
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # ── 后端镜像 ──
-      - name: Build & push backend
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ── 前端镜像 ──
-      - name: Build & push frontend
-        uses: docker/build-push-action@v6
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # ── 部署到服务器 ──
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
-          command_timeout: 10m
+          command_timeout: 5m
           script: |
-            set -e
-            echo "=== 1. 配置 Docker 国内镜像加速 ==="
-            mkdir -p /etc/docker
-            cat > /etc/docker/daemon.json << 'JSON'
-            {
-              "registry-mirrors": [
-                "https://docker.m.daocloud.io",
-                "https://docker.1panel.live",
-                "https://hub.rat.dev"
-              ]
-            }
-            JSON
-            systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
+            # 服务器上已有 .env（由首次手动部署创建，或宝塔面板直接编辑）
+            # 该脚本不传输任何密钥 — Secrets 仅用于 SSH 登录凭证，不落地到文件
+            cd /opt/ai-kb || { echo "/opt/ai-kb 不存在，请先在服务器上手动 git clone 一次"; exit 1; }
+            git pull origin main
+            pip3.12 install -r requirements.txt -q 2>/dev/null || python3.12 -m pip install -r requirements.txt -q
+            python3.12 manage.py migrate
+            cd frontend
+            npm install --quiet
+            npm run build
+            cd ..
+            pkill -f "gunicorn" 2>/dev/null || true
+            sleep 1
+            nohup gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 2 --timeout 120 > /tmp/gunicorn.log 2>&1 &
             sleep 2
-            docker --version
-
-            echo "=== 2. 创建目录 ==="
-            mkdir -p /opt/ai-kb
-
-            echo "=== 3. 写入 docker-compose.yml ==="
-            cat > /opt/ai-kb/docker-compose.yml << 'COMPOSE_EOF'
-            services:
-              backend:
-                image: ghcr.io/bitpzz/ai-kb-backend:latest
-                command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
-                ports:
-                  - "127.0.0.1:8000:8000"
-                volumes:
-                  - data:/app/data
-                  - vector_data:/app/vector_data
-                environment:
-                  - DEBUG=False
-                  - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
-                  - SECRET_KEY=${SECRET_KEY}
-                  - ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
-                restart: unless-stopped
-
-              frontend:
-                image: ghcr.io/bitpzz/ai-kb-frontend:latest
-                ports:
-                  - "127.0.0.1:8080:80"
-                depends_on:
-                  - backend
-                restart: unless-stopped
-
-            volumes:
-              data:
-              vector_data:
-            COMPOSE_EOF
-
-            echo "=== 4. 登录 GitHub Container Registry ==="
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            echo "=== 5. 创建 .env ==="
-            cat > /opt/ai-kb/.env << 'EOF'
-            SILICONFLOW_API_KEY=${{ secrets.SILICONFLOW_API_KEY }}
-            SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
-            ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
-            EOF
-
-            echo "=== 6. 拉取镜像并启动 ==="
-            cd /opt/ai-kb
-            # 重试拉取，每次最多 5 分钟
-            for i in 1 2 3; do
-              echo "拉取第 $i 次..."
-              docker compose pull --quiet && break || sleep 10
-            done
-            docker compose up -d --force-recreate
-            docker image prune -f
-
-            echo "=== 7. 确认运行状态 ==="
-            docker compose ps
-            docker compose logs --tail 20
+            pgrep -a gunicorn || echo "后端未启动！"
+            tail -5 /tmp/gunicorn.log
