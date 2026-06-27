@@ -1,21 +1,25 @@
 services:
   backend:
-    build: .
-    command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - data:/app/data
       - vector_data:/app/vector_data
+    env_file:
+      - .env
     environment:
       - DEBUG=False
-      - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
-      - SECRET_KEY=${SECRET_KEY}
       - ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:8080:80"
     depends_on:

@@ -38,9 +38,11 @@ jobs:
             fi
             cd /opt/ai-kb
 
-            echo "=== 1. 创建 .env ==="
-            test -f .env || printf 'SILICONFLOW_API_KEY=%s\nSECRET_KEY=%s\nDEBUG=False\nALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1\n' \
-              "${{ secrets.SILICONFLOW_API_KEY }}" "${{ secrets.DJANGO_SECRET_KEY }}" > .env
+            echo "=== 1. 创建 .env (首次) ==="
+            if [ ! -f .env ]; then
+              echo ".env 不存在，自动生成（请手动编辑填入真实 KEY）"
+              printf 'SILICONFLOW_API_KEY=changeme\nSECRET_KEY=changeme\nDEBUG=False\nALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1\n' > .env
+            fi
 
             echo "=== 2. 拉取代码 ==="
             git pull origin main
