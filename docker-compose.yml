@@ -1,9 +1,9 @@
 services:
   backend:
-    image: ghcr.io/bitpzz/ai-kb-backend:latest
+    build: .
     command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - data:/app/data
       - vector_data:/app/vector_data
@@ -11,11 +11,11 @@ services:
       - DEBUG=False
       - SILICONFLOW_API_KEY=${SILICONFLOW_API_KEY}
       - SECRET_KEY=${SECRET_KEY}
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-82.156.164.62}
+      - ALLOWED_HOSTS=82.156.164.62,localhost,127.0.0.1
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/bitpzz/ai-kb-frontend:latest
+    build: ./frontend
     ports:
       - "127.0.0.1:8080:80"
     depends_on:
