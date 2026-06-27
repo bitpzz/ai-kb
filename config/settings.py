@@ -27,7 +27,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",
-  # optional: can remove if not using async tasks
     # Local
     "apps.accounts",
     "apps.knowledge",
