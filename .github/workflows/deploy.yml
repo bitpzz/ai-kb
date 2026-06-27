@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:      # 只有改这些文件才触发部署
+      - ".github/**"
       - "**.py"
       - "**.js"
       - "**.jsx"
@@ -11,6 +12,8 @@ on:
       - "**.css"
       - "requirements.txt"
       - "Dockerfile"
+      - "docker-compose.yml"
+      - "bt-nginx.conf"
       - "frontend/Dockerfile"
       - "frontend/package.json"
       - "frontend/nginx.conf"
