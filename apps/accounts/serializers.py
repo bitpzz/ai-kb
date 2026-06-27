@@ -1,12 +1,9 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from django.contrib.auth.password_validation import validate_password
-from django.core.validators import validate_email, RegexValidator
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8, validators=[validate_password])
-    email = serializers.EmailField(required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, min_length=8)
 
     class Meta:
         model = User
@@ -17,10 +14,17 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("用户名至少 3 个字符")
         if len(value) > 30:
             raise serializers.ValidationError("用户名最多 30 个字符")
-        if not value.replace("_", "").isalnum():
-            raise serializers.ValidationError("用户名只能包含字母、数字和下划线")
+        if not value.replace("_", "").replace("-", "").isalnum():
+            raise serializers.ValidationError("用户名只能包含字母、数字、下划线和横线")
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError("用户名已被注册")
+        return value
+
+    def validate_password(self, value):
+        if len(value) < 8:
+            raise serializers.ValidationError("密码至少 8 位")
+        if value.isdigit() or value.isalpha():
+            raise serializers.ValidationError("密码需包含字母和数字")
         return value
 
     def create(self, validated_data):
