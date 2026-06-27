@@ -6,8 +6,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_BACKEND: ${{ github.repository }}-backend
-  IMAGE_NAME_FRONTEND: ${{ github.repository }}-frontend
+  IMAGE_NAME_BACKEND: ${{ github.repository_owner }}-backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository_owner }}-frontend
 
 jobs:
   build-and-deploy:
@@ -75,7 +75,7 @@ jobs:
             cat > /opt/ai-kb/docker-compose.yml << 'COMPOSE_EOF'
             services:
               backend:
-                image: ghcr.io/ZHANGZHH/ai-kb-backend:latest
+                image: ghcr.io/zhangzhh/ai-kb-backend:latest
                 command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2"
                 ports:
                   - "127.0.0.1:8000:8000"
@@ -90,7 +90,7 @@ jobs:
                 restart: unless-stopped
 
               frontend:
-                image: ghcr.io/ZHANGZHH/ai-kb-frontend:latest
+                image: ghcr.io/zhangzhh/ai-kb-frontend:latest
                 ports:
                   - "127.0.0.1:8080:80"
                 depends_on:
