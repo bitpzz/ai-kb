@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_BASE = "/api";
+// 本地开发用 localhost:8000，线上用同端口 /api（proxy.py 转发）
+const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const API_BASE = isLocal ? "http://localhost:8000/api" : "/api";
 
 const api = axios.create({ baseURL: API_BASE, headers: { "Content-Type": "application/json" } });
 
