@@ -27,7 +27,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "corsheaders",
-    "django_q",  # optional: can remove if not using async tasks
+  # optional: can remove if not using async tasks
     # Local
     "apps.accounts",
     "apps.knowledge",
