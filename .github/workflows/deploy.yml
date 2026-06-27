@@ -82,7 +82,7 @@ jobs:
               frontend:
                 image: ghcr.io/ZHANGZHH/ai-kb-frontend:latest
                 ports:
-                  - "80:80"
+                  - "127.0.0.1:8080:80"
                 depends_on:
                   - backend
                 restart: unless-stopped
@@ -93,11 +93,6 @@ jobs:
             COMPOSE_EOF
 
             cd /opt/ai-kb
-            # 停掉宝塔 Nginx 释放 80 端口（由 Docker 前端接管）
-            systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || true
-            systemctl disable nginx 2>/dev/null || true
-            # 如果 80 端口还被占，杀掉占用进程
-            fuser -k 80/tcp 2>/dev/null || true
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             # 创建 .env
             cat > .env << 'EOF'
