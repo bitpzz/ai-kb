@@ -12,6 +12,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: root
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 20m
           script: |
             cd /opt/ai-kb
             git pull origin main
