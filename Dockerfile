@@ -6,14 +6,10 @@ WORKDIR /app
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true
 RUN apt-get update && apt-get install -y --no-install-recommends libmagic1 && rm -rf /var/lib/apt/lists/*
 
-# 全局 pip 走国内镜像（ENV 比 -i 更彻底，子依赖也会走）
-ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
-ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
-ENV PIP_DEFAULT_TIMEOUT=300
-ENV PIP_RETRIES=10
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# ★ 离线安装：先从本地 wheels 装，失败再走网络
+COPY requirements.txt wheels/ /app/
+RUN pip install --no-cache-dir --no-index --find-links /app/wheels -r requirements.txt || \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
