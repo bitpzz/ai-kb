@@ -16,4 +16,5 @@ jobs:
           script: |
             cd /opt/ai-kb
             git pull origin main
-            docker compose up -d --build
+            nohup docker compose up -d --build > /tmp/deploy.log 2>&1 &
+            echo "Build started in background"
